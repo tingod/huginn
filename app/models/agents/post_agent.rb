@@ -1,5 +1,6 @@
 module Agents
   class PostAgent < Agent
+    include EventHeadersConcern
     include WebRequestConcern
     include FileHandling
 
@@ -32,6 +33,8 @@ module Agents
         The Event will also have a "headers" hash and a "status" integer value.
 
         If `output_mode` is set to `merge`, the emitted Event will be merged into the original contents of the received Event.
+
+        Set `event_headers` to a list of header names, either in an array of string or in a comma-separated string, to include only some of the header values.
 
         Set `event_headers_style` to one of the following values to normalize the keys of "headers" for downstream agents' convenience:
 
@@ -85,7 +88,13 @@ module Agents
     end
 
     def working?
-      last_receive_at && last_receive_at > interpolated['expected_receive_period_in_days'].to_i.days.ago && !recent_error_logs?
+      return false if recent_error_logs?
+      
+      if interpolated['expected_receive_period_in_days'].present?
+        return false unless last_receive_at && last_receive_at > interpolated['expected_receive_period_in_days'].to_i.days.ago
+      end
+
+      true
     end
 
     def method
@@ -93,32 +102,33 @@ module Agents
     end
 
     def validate_options
-      unless options['post_url'].present? && options['expected_receive_period_in_days'].present?
-        errors.add(:base, "post_url and expected_receive_period_in_days are required fields")
+      unless options['post_url'].present?
+        errors.add(:base, "post_url is a required field")
       end
 
-      if options['payload'].present? && %w[get delete].include?(method) && !options['payload'].is_a?(Hash)
-        errors.add(:base, "if provided, payload must be a hash")
+      if options['payload'].present? && %w[get delete].include?(method) && !(options['payload'].is_a?(Hash) || options['payload'].is_a?(Array))
+        errors.add(:base, "if provided, payload must be a hash or an array")
       end
 
       if options['payload'].present? && %w[post put patch].include?(method)
-        if !options['payload'].is_a?(Hash) && options['content_type'] !~ MIME_RE
-          errors.add(:base, "if provided, payload must be a hash")
+        if !(options['payload'].is_a?(Hash) || options['payload'].is_a?(Array)) && options['content_type'] !~ MIME_RE
+          errors.add(:base, "if provided, payload must be a hash or an array")
         end
-        if options['content_type'] =~ MIME_RE && options['payload'].is_a?(String) && boolify(options['no_merge']) != true
-          errors.add(:base, "when the payload is a string, `no_merge` has to be set to `true`")
-        end
+      end
+
+      if options['content_type'] =~ MIME_RE && options['payload'].is_a?(String) && boolify(options['no_merge']) != true
+        errors.add(:base, "when the payload is a string, `no_merge` has to be set to `true`")
+      end
+
+      if options['content_type'] == 'form' && options['payload'].present? && options['payload'].is_a?(Array)
+        errors.add(:base, "when content_type is a form, if provided, payload must be a hash")
       end
 
       if options.has_key?('emit_events') && boolify(options['emit_events']).nil?
         errors.add(:base, "if provided, emit_events must be true or false")
       end
 
-      begin
-        normalize_response_headers({})
-      rescue ArgumentError => e
-        errors.add(:base, e.message)
-      end
+      validate_event_headers_options!
 
       unless %w[post get put delete patch].include?(method)
         errors.add(:base, "method must be 'post', 'get', 'put', 'delete', or 'patch'")
@@ -157,29 +167,6 @@ module Agents
     end
 
     private
-
-    def normalize_response_headers(headers)
-      case interpolated['event_headers_style']
-      when nil, '', 'capitalized'
-        normalize = ->name {
-          name.gsub(/(?:\A|(?<=-))([[:alpha:]])|([[:alpha:]]+)/) {
-            $1 ? $1.upcase : $2.downcase
-          }
-        }
-      when 'downcased'
-        normalize = :downcase.to_proc
-      when 'snakecased', nil
-        normalize = ->name { name.tr('A-Z-', 'a-z_') }
-      when 'raw'
-        normalize = ->name { name }  # :itself.to_proc in Ruby >= 2.2
-      else
-        raise ArgumentError, "if provided, event_headers_style must be 'capitalized', 'downcased', 'snakecased' or 'raw'"
-      end
-
-      headers.each_with_object({}) { |(key, value), hash|
-        hash[normalize[key]] = value
-      }
-    end
 
     def handle(data, event = Event.new, headers)
       url = interpolated(event.payload)[:post_url]
@@ -223,10 +210,15 @@ module Agents
         new_event = interpolated['output_mode'].to_s == 'merge' ? event.payload.dup : {}
         create_event payload: new_event.merge(
           body: response.body,
-          headers: normalize_response_headers(response.headers),
           status: response.status
+        ).merge(
+          event_headers_payload(response.headers)
         )
       end
+    end
+
+    def event_headers_key
+      super || 'headers'
     end
   end
 end

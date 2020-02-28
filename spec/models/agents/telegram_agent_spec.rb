@@ -26,10 +26,6 @@ describe Agents::TelegramAgent do
   end
 
   def stub_methods
-    stub.any_instance_of(Agents::TelegramAgent).load_file do |_url|
-      :stubbed_file
-    end
-
     stub.any_instance_of(Agents::TelegramAgent).send_message do |method, params|
       @sent_messages << { method => params }
     end
@@ -51,7 +47,7 @@ describe Agents::TelegramAgent do
     end
 
     it 'should validate value of caption' do
-      @checker.options[:caption] = 'a' * 250
+      @checker.options[:caption] = 'a' * 1025
       expect(@checker).not_to be_valid
     end
 
@@ -101,18 +97,18 @@ describe Agents::TelegramAgent do
     end
 
     it 'accepts audio key and uses :send_audio to send the file with truncated caption' do
-      event = event_with_payload audio: 'https://example.com/sound.mp3', caption: 'a' * 250
+      event = event_with_payload audio: 'https://example.com/sound.mp3', caption: 'a' * 1025
       @checker.receive [event]
 
-      expect(@sent_messages).to eq([{ audio: { audio: :stubbed_file, caption: 'a'* 200, chat_id: 'xxxxxxxx' } }])
+      expect(@sent_messages).to eq([{ audio: { audio: 'https://example.com/sound.mp3', caption: 'a'* 1024, chat_id: 'xxxxxxxx' } }])
     end
 
     it 'accepts document key and uses :send_document to send the file and the full caption' do
-      event = event_with_payload caption: "#{'a' * 199}  #{'b' * 6}", document: 'https://example.com/document.pdf', long: 'split'
+      event = event_with_payload caption: "#{'a' * 1023}  #{'b' * 6}", document: 'https://example.com/document.pdf', long: 'split'
       @checker.receive [event]
 
       expect(@sent_messages).to eq([
-                                    { document: { caption: 'a' * 199, chat_id: 'xxxxxxxx', document: :stubbed_file } },
+                                    { document: { caption: 'a' * 1023, chat_id: 'xxxxxxxx', document: 'https://example.com/document.pdf' } },
                                     { text: { chat_id: 'xxxxxxxx', parse_mode: 'html', text: 'b' * 6 } }
                                    ])
     end
@@ -121,14 +117,14 @@ describe Agents::TelegramAgent do
       event = event_with_payload photo: 'https://example.com/image.png'
       @checker.receive [event]
 
-      expect(@sent_messages).to eq([{ photo: { chat_id: 'xxxxxxxx', photo: :stubbed_file } }])
+      expect(@sent_messages).to eq([{ photo: { chat_id: 'xxxxxxxx', photo: 'https://example.com/image.png' } }])
     end
 
     it 'accepts video key and uses :send_video to send the file' do
       event = event_with_payload video: 'https://example.com/video.avi'
       @checker.receive [event]
 
-      expect(@sent_messages).to eq([{ video: { chat_id: 'xxxxxxxx', video: :stubbed_file } }])
+      expect(@sent_messages).to eq([{ video: { chat_id: 'xxxxxxxx', video: 'https://example.com/video.avi' } }])
     end
 
     it 'creates a log entry when no key of the received event was useable' do

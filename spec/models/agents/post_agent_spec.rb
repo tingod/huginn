@@ -52,7 +52,7 @@ describe Agents::PostAgent do
           raise "unexpected Content-Type: #{content_type}"
         end
       end
-      { status: 200, body: "<html>a webpage!</html>", headers: { 'Content-type' => 'text/html' } }
+      { status: 200, body: "<html>a webpage!</html>", headers: { 'Content-type' => 'text/html', 'X-Foo-Bar' => 'baz' } }
     }
   end
 
@@ -272,23 +272,30 @@ describe Agents::PostAgent do
 
         it "emits the response headers capitalized by default" do
           @checker.check
-          expect(@checker.events.last.payload['headers']).to eq({ 'Content-Type' => 'text/html' })
+          expect(@checker.events.last.payload['headers']).to eq({ 'Content-Type' => 'text/html', 'X-Foo-Bar' => 'baz' })
         end
 
         it "emits the response headers capitalized" do
           @checker.options['event_headers_style'] = 'capitalized'
           @checker.check
-          expect(@checker.events.last.payload['headers']).to eq({ 'Content-Type' => 'text/html' })
+          expect(@checker.events.last.payload['headers']).to eq({ 'Content-Type' => 'text/html', 'X-Foo-Bar' => 'baz' })
         end
 
         it "emits the response headers downcased" do
           @checker.options['event_headers_style'] = 'downcased'
           @checker.check
-          expect(@checker.events.last.payload['headers']).to eq({ 'content-type' => 'text/html' })
+          expect(@checker.events.last.payload['headers']).to eq({ 'content-type' => 'text/html', 'x-foo-bar' => 'baz' })
         end
 
         it "emits the response headers snakecased" do
           @checker.options['event_headers_style'] = 'snakecased'
+          @checker.check
+          expect(@checker.events.last.payload['headers']).to eq({ 'content_type' => 'text/html', 'x_foo_bar' => 'baz' })
+        end
+
+        it "emits the response headers only including those specified by event_headers" do
+          @checker.options['event_headers_style'] = 'snakecased'
+          @checker.options['event_headers'] = 'content-type'
           @checker.check
           expect(@checker.events.last.payload['headers']).to eq({ 'content_type' => 'text/html' })
         end
@@ -311,6 +318,24 @@ describe Agents::PostAgent do
   end
 
   describe "#working?" do
+    it "checks if there was an error" do
+      @checker.error("error")
+      expect(@checker.logs.count).to eq(1)
+      expect(@checker.reload).not_to be_working
+    end
+
+    it "checks if 'expected_receive_period_in_days' was not set" do
+      expect(@checker.logs.count).to eq(0)
+      @checker.options.delete('expected_receive_period_in_days')
+      expect(@checker).to be_working
+    end
+
+    it "checks if no event has been received" do
+      expect(@checker.logs.count).to eq(0)
+      expect(@checker.last_receive_at).to be_nil
+      expect(@checker.reload).not_to be_working
+    end
+
     it "checks if events have been received within expected receive period" do
       expect(@checker).not_to be_working
       Agents::PostAgent.async_receive @checker.id, [@event.id]
@@ -331,9 +356,9 @@ describe Agents::PostAgent do
       expect(@checker).not_to be_valid
     end
 
-    it "should validate presence of expected_receive_period_in_days" do
+    it "should validate absence of expected_receive_period_in_days is allowed" do
       @checker.options['expected_receive_period_in_days'] = ""
-      expect(@checker).not_to be_valid
+      expect(@checker).to be_valid
     end
 
     it "should validate method as post, get, put, patch, or delete, defaulting to post" do
@@ -382,17 +407,17 @@ describe Agents::PostAgent do
       @checker.options['payload'] = ""
       expect(@checker).to be_valid
 
-      @checker.options['payload'] = "hello"
-      expect(@checker).not_to be_valid
-
       @checker.options['payload'] = ["foo", "bar"]
+      expect(@checker).to be_valid
+
+      @checker.options['payload'] = "hello"
       expect(@checker).not_to be_valid
 
       @checker.options['payload'] = { 'this' => 'that' }
       expect(@checker).to be_valid
     end
 
-    it "should not validate payload as a hash if content_type includes a MIME type and method is not get or delete" do
+    it "should not validate payload as a hash or an array if content_type includes a MIME type and method is not get or delete" do
       @checker.options['no_merge'] = 'true'
       @checker.options['content_type'] = 'text/xml'
       @checker.options['payload'] = "test"
