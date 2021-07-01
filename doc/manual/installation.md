@@ -72,7 +72,7 @@ Remove the old Ruby versions if present:
 Download Ruby and compile it:
 
     mkdir /tmp/ruby && cd /tmp/ruby
-    curl -L --progress https://cache.ruby-lang.org/pub/ruby/2.6/ruby-2.6.5.tar.bz2 | tar xj
+    curl -L --progress-bar https://cache.ruby-lang.org/pub/ruby/2.6/ruby-2.6.5.tar.bz2 | tar xj
     cd ruby-2.6.5
     ./configure --disable-install-rdoc
     make -j`nproc`
@@ -80,7 +80,8 @@ Download Ruby and compile it:
 
 Install the bundler and foreman gems:
 
-    sudo gem install rake bundler foreman --no-document
+    sudo gem install rake foreman --no-document
+    sudo gem install bundler -v '< 2' --no-document
 
 Update rubygems:
 
@@ -130,6 +131,9 @@ Ensure you can use the InnoDB engine which is necessary to support long indexes
 Grant the Huginn user necessary permissions on the database
 
     mysql> GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, INDEX, ALTER, LOCK TABLES ON `huginn_production`.* TO 'huginn'@'localhost';
+
+Use the flush privileges command to save the new permissions
+    mysql> FLUSH PRIVILEGES;
 
 Quit the database session
 
@@ -260,6 +264,8 @@ Enable (remove the comment) [from these lines](https://github.com/huginn/huginn/
 
     # web: bundle exec unicorn -c config/unicorn.rb
     # jobs: bundle exec rails runner bin/threaded.rb
+
+**Note:** Ensure you have no leading spaces before `web:` or `jobs:` in your `Procfile` file.
 
 Export the init scripts:
 
